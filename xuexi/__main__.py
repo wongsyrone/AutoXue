@@ -31,14 +31,14 @@ def shuffle(funcs):
 def start():
     if random.random() > 0.5:
         logger.debug(f'视听学习优先')
-        app.watch()
+        #app.watch()
         app.music()
-        shuffle([app.read, app.daily, app.challenge, app.weekly])
+        shuffle([app.daily, app.challenge, app.weekly])
     else:
         logger.debug(f'视听学习置后')
         app.music()
-        shuffle([app.read, app.daily, app.challenge, app.weekly])
-        app.watch()
+        shuffle([app.daily, app.challenge, app.weekly])
+        #app.watch()
     app.logout_or_not()
     
     sys.exit(0)
