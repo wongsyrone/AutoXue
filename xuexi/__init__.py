@@ -43,6 +43,7 @@ class Automation():
             "appPackage": caps["apppackage"],
             "appActivity": caps["appactivity"]
         }
+        logger.info('===============START===============')
         logger.info('打开 appium 服务,正在配置...')
         self.driver = webdriver.Remote('http://localhost:4723/wd/hub', self.desired_caps)
         self.wait = WebDriverWait(self.driver, 15)
@@ -250,6 +251,9 @@ class App(Automation):
         logger.info(f'根据搜索结果: {i} 很可能是正确答案')
         return i
 
+    '''
+    return (DatabaseHasAnswerAlready, answer)
+    '''
     def _verify(self, category, content, options):
         # 职责: 检索题库 查看提示
         letters = list("ABCDEFGHIJKLMN")
@@ -260,17 +264,17 @@ class App(Automation):
         })
         if self.bank and self.bank["answer"]:
             logger.info(f'已知的正确答案: {self.bank["answer"]}')
-            return self.bank["answer"]
+            return True, self.bank["answer"]
         excludes = self.bank["excludes"] if self.bank else ""
         tips = self._view_tips()
         if not tips:
             logger.debug("本题没有提示")
             if "填空题" == category:
-                return None
+                return False, None
             elif "多选题" == category:
-                return "ABCDEFG"[:len(options)]
+                return False, "ABCDEFG"[:len(options)]
             elif "单选题" == category:
-                return self._search(content, options, excludes)
+                return False, self._search(content, options, excludes)
             else:
                 logger.debug("题目类型非法")            
         else:
@@ -284,16 +288,16 @@ class App(Automation):
                     logger.debug(f'匹配模式 {pattern}')
                     res = re.findall(pattern, tips)
                     if 1 == len(res):
-                        return res[0]
+                        return False, res[0]
                 logger.debug(f'多处填空题难以预料结果，索性不处理')
-                return None
+                return False, "".join(dest)
                 
             elif "多选题" == category:
                 check_res = [letter for letter, option in zip(letters, options) if option in tips]
                 if len(check_res) > 1:
                     logger.debug(f'根据提示，可选项有: {check_res}')
-                    return "".join(check_res)
-                return "ABCDEFG"[:len(options)]
+                    return False, "".join(check_res)
+                return False, "ABCDEFG"[:len(options)]
             elif "单选题" == category:
                 radio_in_tips, radio_out_tips = "", ""
                 for letter, option in zip(letters, options):
@@ -307,11 +311,11 @@ class App(Automation):
                 logger.debug(f'含 {radio_in_tips} 不含 {radio_out_tips}')
                 if 1 == len(radio_in_tips) and radio_in_tips not in excludes:
                     logger.debug(f'根据提示 {radio_in_tips}')
-                    return radio_in_tips
+                    return False, radio_in_tips
                 if 1 == len(radio_out_tips) and radio_out_tips not in excludes:
                     logger.debug(f'根据提示 {radio_out_tips}')
-                    return radio_out_tips
-                return self._search(content, options, excludes)
+                    return False, radio_out_tips
+                return False, self._search(content, options, excludes)
             else:
                 logger.debug("题目类型非法")
 
@@ -350,7 +354,7 @@ class App(Automation):
             options = [x.get_attribute("name") for x in option_elements]
             length_of_options = len(options)
             logger.info(f'<{num}> {content}')
-            answer = self._verify(category='单选题', content=content, options=options)
+            isdbhasans, answer = self._verify(category='单选题', content=content, options=options)
             delay_time = random.randint(self.challenge_delay_bot, self.challenge_delay_top)
             logger.info(f'随机延时 {delay_time} 秒提交答案: {answer}')
             time.sleep(delay_time)
@@ -390,7 +394,7 @@ class App(Automation):
             options = [x.get_attribute("name") for x in option_elements]
             length_of_options = len(options)
             logger.info(f'<{num}> {content}')
-            answer = self._verify(category='单选题', content=content, options=options)
+            isdbhasans, answer = self._verify(category='单选题', content=content, options=options)
             final_choose = ((ord(answer)-65)+random.randint(1,length_of_options))%length_of_options
             delay_time = random.randint(self.challenge_delay_bot, self.challenge_delay_top)
             logger.info(f'随机延时 {delay_time} 秒提交答案: {chr(final_choose+65)}')
@@ -437,6 +441,31 @@ class App(Automation):
 
 # 每日答题模块
 # class Daily(App):
+    def _daily_wrong_or_not(self, msg="default"):
+        try:
+            wrong_or_not = self.driver.find_element_by_xpath(rules["daily_wrong_or_not"])
+            logger.debug(msg + "回答错误")
+            return False
+        except:
+            logger.debug(msg + "回答正确")
+            return True
+
+    def _daily_get_right_answer(self, msg="default"):
+        try:
+            right_answer = self.driver.find_element_by_xpath(rules["daily_answer"]).get_attribute("name")
+            return right_answer
+        except:
+            logger.debug(msg + "cannot find daily right_answer")
+            return None
+
+    def _daily_get_notes(self, msg="default"):
+        try:
+            notes = self.driver.find_element_by_xpath(rules["daily_notes"]).get_attribute("name")
+            return notes
+        except:
+            logger.debug(msg + "cannot find daily notes")
+            return None
+
     def _daily_init(self):
         # super().__init__()
         self.g, self.t = 0, 6
@@ -542,10 +571,12 @@ class App(Automation):
         # blank_edits = self.find_elements(rules["daily_blank_edits"])
         length_of_edits = len(blank_edits)
         logger.info(f'填空题 {content}')
-        answer = self._verify("填空题", content, "") # 
+        isdbhasans, answer = self._verify("填空题", content, "") # 
         if not answer:
             words = (''.join(random.sample(string.ascii_letters + string.digits, 8)) for i in range(length_of_edits))
         else:
+            answer = answer.strip()
+            logger.debug(f'after trim string: {answer}')
             words = answer.split(" ")
         logger.debug(f'提交答案 {words}')
         for k,v in zip(blank_edits, words):
@@ -553,12 +584,39 @@ class App(Automation):
             time.sleep(1)
 
         self._submit()
-        try:            
-            wrong_or_not = self.driver.find_element_by_xpath(rules["daily_wrong_or_not"])
-            right_answer = self.driver.find_element_by_xpath(rules["daily_answer"]).get_attribute("name")
+
+        if self._daily_wrong_or_not("_blank"):
+            logger.debug("填空题回答正确")
+            if not isdbhasans:
+                if 1 == length_of_edits:
+                    self._update_bank({
+                        "category": "填空题",
+                        "content": content,
+                        "options": [""],
+                        "answer": answer,
+                        "excludes": "",
+                        "notes": ""
+                    })
+                else:
+                    logger.error("多位置的填空题待验证正确性")
+                    self._update_bank({
+                        "category": "填空题",
+                        "content": content,
+                        "options": [""],
+                        "answer": self._blank_answer_divide(answer, spaces),
+                        "excludes": "",
+                        "notes": ""
+                    })
+        else:
+            logger.debug("填空题回答错误")
+            right_answer = self._daily_get_right_answer()
+            if right_answer is None:
+                raise IOError("no right_answer")
             answer = re.sub(r'正确答案： ', '', right_answer)
             logger.info(f"答案 {answer}")
-            notes = self.driver.find_element_by_xpath(rules["daily_notes"]).get_attribute("name")
+            notes = self._daily_get_notes()
+            if notes is None:
+                raise IOError("no notes")
             logger.debug(f"解析 {notes}")
             self._submit(2)
             if 1 == length_of_edits:
@@ -580,10 +638,7 @@ class App(Automation):
                     "excludes": "",
                     "notes": notes
                 })
-        except:
-            logger.debug("填空题回答正确")
 
-        
     def _radio(self):
         content = self.wait.until(EC.presence_of_element_located((By.XPATH, rules["daily_content"]))).get_attribute("name")
         # content = self.find_element(rules["daily_content"]).get_attribute("name")
@@ -593,7 +648,7 @@ class App(Automation):
         length_of_options = len(options)
         logger.info(f"单选题 {content}")
         logger.info(f"选项 {options}")
-        answer = self._verify("单选题", content, options)
+        isdbhasans, answer = self._verify("单选题", content, options)
         choose_index = ord(answer) - 65
         logger.info(f"提交答案 {answer}")
         option_elements[choose_index].click()
@@ -633,7 +688,7 @@ class App(Automation):
         options = [x.get_attribute("name") for x in option_elements]
         length_of_options = len(options)
         logger.info(f"多选题 {content}\n{options}")
-        answer = self._verify("多选题", content, options)
+        isdbhasans, answer = self._verify("多选题", content, options)
         logger.debug(f'提交答案 {answer}')
         for k, option in zip(list("ABCDEFG"), option_elements):
             if k in answer:
